@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Healthcare IDS — Attack Summary</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f1419; color: #e6e8eb; }
+  .navbar { background: #161b22; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
+  .navbar h1 { font-size: 18px; font-weight: 600; }
+  .navbar a { color: #58a6ff; text-decoration: none; margin-left: 20px; font-size: 14px; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 32px; }
+
+  .sensor-bar { display: flex; align-items: center; gap: 18px; margin-bottom: 18px; background: #12161c; border: 1px solid #30363d; border-radius: 8px; padding: 14px 18px; flex-wrap: wrap; }
+  .sensor-dot { width: 9px; height: 9px; border-radius: 50%; background: #f85149; flex-shrink: 0; }
+  .sensor-dot.on { background: #3fb950; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .sensor-item { font-size: 12px; color: #8b949e; }
+  .sensor-item strong { color: #e6e8eb; font-weight: 600; }
+
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 22px; margin-bottom: 18px; }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+
+  .mode-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+  .mode-btn { padding: 7px 14px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; font-size: 12px; cursor: pointer; color: #e6e8eb; }
+  .mode-btn.active { background: #1f6feb; border-color: #1f6feb; }
+  .custom-row { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; align-items: end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; color: #8b949e; }
+  input[type=datetime-local] { background: #0d1117; border: 1px solid #30363d; color: #e6e8eb; padding: 8px 10px; border-radius: 6px; font-size: 12px; }
+  button { padding: 8px 18px; border-radius: 6px; border: 1px solid #30363d; font-size: 13px; cursor: pointer; font-weight: 600; background: #21262d; color: #e6e8eb; }
+  button:hover { border-color: #58a6ff; }
+  .btn-refresh { background: #1f6feb; color: white; border: none; }
+  .window-label { font-size: 12px; color: #8b949e; margin-top: 10px; }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .kpi { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 16px; text-align: center; }
+  .kpi .val { font-size: 22px; font-weight: 700; }
+  .kpi .lbl { font-size: 11px; color: #8b949e; margin-top: 4px; }
+  .kpi.attack .val { color: #f85149; }
+  .kpi.normal .val { color: #3fb950; }
+
+  .sev-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .sev-box { border-radius: 8px; padding: 16px; text-align: center; border: 1px solid; }
+  .sev-box .val { font-size: 24px; font-weight: 700; }
+  .sev-box .lbl { font-size: 11px; margin-top: 4px; text-transform: uppercase; }
+  .sev-box.critical { background: rgba(248,81,73,.1); border-color: #f85149; }
+  .sev-box.critical .val, .sev-box.critical .lbl { color: #f85149; }
+  .sev-box.high { background: rgba(240,136,62,.1); border-color: #f0883e; }
+  .sev-box.high .val, .sev-box.high .lbl { color: #f0883e; }
+  .sev-box.medium { background: rgba(210,153,34,.1); border-color: #d29922; }
+  .sev-box.medium .val, .sev-box.medium .lbl { color: #d29922; }
+  .sev-box.low { background: rgba(139,148,158,.1); border-color: #8b949e; }
+  .sev-box.low .val, .sev-box.low .lbl { color: #8b949e; }
+
+  .sev-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+  .sev-critical { background: rgba(248,81,73,.25); color: #f85149; }
+  .sev-high     { background: rgba(240,136,62,.2);  color: #f0883e; }
+  .sev-medium   { background: rgba(210,153,34,.2);  color: #d29922; }
+  .sev-low      { background: rgba(139,148,158,.2); color: #8b949e; }
+
+  .type-row { display: flex; align-items: center; margin-bottom: 10px; font-size: 13px; }
+  .type-row .name { width: 220px; flex-shrink: 0; }
+  .type-row .bar-bg { flex: 1; background: #0d1117; border-radius: 4px; height: 18px; overflow: hidden; }
+  .type-row .bar-fg { height: 100%; border-radius: 4px; }
+  .type-row .count { width: 50px; text-align: right; color: #8b949e; flex-shrink: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #30363d; }
+  th { color: #8b949e; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+
+  .two-col   { display: grid; grid-template-columns: 1fr 1fr;   gap: 18px; }
+  .three-col { display: grid; grid-template-columns: 2fr 1fr;   gap: 18px; }
+  .empty-state { text-align: center; padding: 60px; color: #8b949e; font-size: 13px; }
+  .timeline-wrap { overflow-x: auto; }
+  .tl-label { font-size: 10px; fill: #8b949e; }
+  .proto-legend { display: flex; gap: 16px; margin-top: 12px; flex-wrap: wrap; }
+  .proto-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8b949e; }
+  .proto-dot { width: 10px; height: 10px; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="navbar">
+  <h1>Healthcare IDS — Attack Summary</h1>
+  <div>
+    <a href="/summary">Attack Summary</a>
+    <a href="/live">Live Detection</a>
+  </div>
+</div>
+
+<div class="container">
+
+  <div class="sensor-bar">
+    <div class="sensor-dot" id="sensorDot"></div>
+    <div class="sensor-item" id="sensorStatus">Checking sensor…</div>
+    <div class="sensor-item" id="sensorLaunch"></div>
+    <div class="sensor-item" id="sensorIface"></div>
+    <div class="sensor-item" id="sensorTotal"></div>
+  </div>
+
+  <div class="card">
+    <h2>Timeframe</h2>
+    <div class="mode-row" id="modeRow">
+      <div class="mode-btn" data-mode="last_minutes" data-minutes="5">Last 5 min</div>
+      <div class="mode-btn active" data-mode="last_minutes" data-minutes="15">Last 15 min</div>
+      <div class="mode-btn" data-mode="last_minutes" data-minutes="30">Last 30 min</div>
+      <div class="mode-btn" data-mode="last_minutes" data-minutes="60">Last 1 hour</div>
+      <div class="mode-btn" data-mode="since_launch">Since launch</div>
+      <div class="mode-btn" data-mode="custom">Custom range</div>
+      <button class="btn-refresh" onclick="loadSummary()" style="margin-left:auto;">Refresh</button>
+    </div>
+    <div class="custom-row" id="customRow" style="display:none;">
+      <div class="field"><label>From</label><input type="datetime-local" id="rangeStart"></div>
+      <div class="field"><label>To</label><input type="datetime-local" id="rangeEnd"></div>
+    </div>
+    <div class="window-label" id="windowLabel"></div>
+  </div>
+
+  <div id="summaryContent">
+    <div class="card"><div class="empty-state">Loading summary…</div></div>
+  </div>
+
+</div>
+
+<script>
+let selectedMode = 'last_minutes', selectedMinutes = 15;
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedMode    = btn.dataset.mode;
+    selectedMinutes = btn.dataset.minutes ? parseInt(btn.dataset.minutes) : null;
+    document.getElementById('customRow').style.display = selectedMode === 'custom' ? 'flex' : 'none';
+    if (selectedMode !== 'custom') loadSummary();
+  });
+});
+
+function buildQuery() {
+  const p = new URLSearchParams();
+  p.set('mode', selectedMode);
+  if (selectedMode === 'last_minutes') p.set('minutes', selectedMinutes);
+  else if (selectedMode === 'custom') {
+    const s = document.getElementById('rangeStart').value;
+    const e = document.getElementById('rangeEnd').value;
+    if (s) p.set('start', s + ':00');
+    if (e) p.set('end',   e + ':00');
+  }
+  return p.toString();
+}
+
+function typeColor(n) {
+  return {'DDoS / Flood':'#f85149','Port Scan / Probe':'#d29922',
+          'Data Exfiltration':'#a371f7','DNS Tunneling / Exfiltration':'#a371f7',
+          'Brute Force / Auth Attempt':'#58a6ff','Slow DoS (Slowloris-style)':'#f0883e',
+          'Other Anomaly':'#8b949e'}[n] || '#8b949e';
+}
+function protoColor(n) { return {'TCP':'#58a6ff','UDP':'#a371f7'}[n] || '#8b949e'; }
+
+async function loadSensorStatus() {
+  const res  = await fetch('/api/live/status');
+  const data = await res.json();
+  const dot = document.getElementById('sensorDot');
+  dot.classList.toggle('on', !!data.running);
+  document.getElementById('sensorStatus').innerHTML =
+    `<strong>${data.running ? 'Sensor active' : 'Sensor offline'}</strong>`;
+  document.getElementById('sensorLaunch').innerHTML =
+    data.launch_time ? `Capturing since <strong>${data.launch_time.replace('T',' ')}</strong>` : '';
+  document.getElementById('sensorIface').innerHTML =
+    data.iface ? `Interface <strong>${data.iface}</strong>` : '';
+  document.getElementById('sensorTotal').innerHTML =
+    `<strong>${data.total_logged || 0}</strong> flows logged total`;
+}
+
+async function loadSummary() {
+  const content = document.getElementById('summaryContent');
+  const res  = await fetch(`/api/live/summary?${buildQuery()}`);
+  const data = await res.json();
+
+  if (data.error) {
+    content.innerHTML = `<div class="card"><div class="empty-state">${data.error}</div></div>`;
+    document.getElementById('windowLabel').textContent = '';
+    return;
+  }
+  document.getElementById('windowLabel').textContent =
+    `Window: ${data.window_start} to ${data.window_end}`;
+
+  if (data.total_flows === 0) {
+    content.innerHTML = `<div class="card"><div class="empty-state">No flows in this timeframe yet.</div></div>`;
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="card">
+      <h2>Overview</h2>
+      <div class="kpi-grid">
+        <div class="kpi attack"><div class="val">${data.attack_flows}</div><div class="lbl">Attack Flows</div></div>
+        <div class="kpi normal"><div class="val">${data.normal_flows}</div><div class="lbl">Normal Flows</div></div>
+        <div class="kpi"><div class="val">${data.unique_attackers}</div><div class="lbl">Unique Attacker IPs</div></div>
+        <div class="kpi"><div class="val">${data.unique_targets}</div><div class="lbl">Unique Targets</div></div>
+        <div class="kpi"><div class="val">${data.avg_confidence}%</div><div class="lbl">Avg Confidence</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Alert Severity</h2>
+      <div class="sev-grid">
+        ${['critical','high','medium','low'].map(l => `
+          <div class="sev-box ${l}">
+            <div class="val">${data.severity_breakdown[l] || 0}</div>
+            <div class="lbl">${l}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Attack Volume Over Time</h2>
+      <div class="timeline-wrap">${renderTimeline(data.timeline, data.bucket_seconds)}</div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <h2>Attack Type Breakdown</h2>
+        ${renderTypeBars(data.type_breakdown, data.attack_flows)}
+        <div class="window-label" style="margin-top:12px;">Categories inferred heuristically from flow shape. Not produced by the Random Forest model.</div>
+      </div>
+      <div class="card">
+        <h2>Protocol Distribution</h2>
+        ${renderProtoBars(data.protocol_breakdown)}
+      </div>
+    </div>
+
+    <div class="three-col">
+      <div class="card">
+        <h2>Recent Critical / High Severity Events</h2>
+        ${renderCriticalTable(data.recent_critical)}
+      </div>
+      <div class="card">
+        <h2>Top Targeted Ports</h2>
+        ${renderPortTable(data.top_ports)}
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <h2>Top Attacker IPs</h2>
+        ${renderSimpleTable(data.top_sources, 'ip', 'Source IP')}
+      </div>
+      <div class="card">
+        <h2>Top Targeted Hosts</h2>
+        ${renderSimpleTable(data.top_targets, 'target', 'Target (host:port)')}
+      </div>
+    </div>
+  `;
+}
+
+function renderTypeBars(breakdown, total) {
+  const entries = Object.entries(breakdown).sort((a,b) => b[1]-a[1]);
+  if (!entries.length) return `<div class="empty-state">No attack flows.</div>`;
+  return entries.map(([name, count]) => {
+    const pct = total ? (count/total*100) : 0;
+    return `<div class="type-row">
+      <div class="name">${name}</div>
+      <div class="bar-bg"><div class="bar-fg" style="width:${pct}%;background:${typeColor(name)}"></div></div>
+      <div class="count">${count}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderProtoBars(breakdown) {
+  const entries = Object.entries(breakdown).sort((a,b) => b[1]-a[1]);
+  if (!entries.length) return `<div class="empty-state">No data.</div>`;
+  const total = entries.reduce((s,[,c]) => s+c, 0);
+  const bars  = entries.map(([n,c]) => `<div class="type-row">
+    <div class="name">${n}</div>
+    <div class="bar-bg"><div class="bar-fg" style="width:${total?c/total*100:0}%;background:${protoColor(n)}"></div></div>
+    <div class="count">${c}</div>
+  </div>`).join('');
+  const legend = `<div class="proto-legend">${entries.map(([n]) =>
+    `<div class="proto-legend-item"><div class="proto-dot" style="background:${protoColor(n)}"></div>${n}</div>`
+  ).join('')}</div>`;
+  return bars + legend;
+}
+
+function renderCriticalTable(rows) {
+  if (!rows.length) return `<div class="empty-state">No critical or high severity events.</div>`;
+  let h = `<table><tr><th>Time</th><th>Source</th><th>Target</th><th>Type</th><th>Severity</th><th>Conf.</th></tr>`;
+  rows.forEach(r => {
+    h += `<tr><td>${r.time}</td><td>${r.src_ip}:${r.src_port}</td><td>${r.dst_ip}:${r.dst_port}</td>
+      <td>${r.attack_type}</td>
+      <td><span class="sev-badge sev-${r.severity}">${r.severity}</span></td>
+      <td>${r.confidence}%</td></tr>`;
+  });
+  return h + `</table>`;
+}
+
+function renderPortTable(rows) {
+  if (!rows.length) return `<div class="empty-state">No data.</div>`;
+  let h = `<table><tr><th>Port</th><th>Attack Flows</th></tr>`;
+  rows.forEach(r => { h += `<tr><td>${r.port}</td><td>${r.count}</td></tr>`; });
+  return h + `</table>`;
+}
+
+function renderSimpleTable(rows, key, label) {
+  if (!rows.length) return `<div class="empty-state">No data.</div>`;
+  let h = `<table><tr><th>${label}</th><th>Attack Flows</th></tr>`;
+  rows.forEach(r => { h += `<tr><td>${r[key]}</td><td>${r.count}</td></tr>`; });
+  return h + `</table>`;
+}
+
+function renderTimeline(timeline, bucketSec) {
+  if (!timeline.length) return `<div class="empty-state">No data.</div>`;
+  const W = 880, H = 130, gap = 4;
+  const bw  = (W / timeline.length) - gap;
+  const max = Math.max(...timeline, 1);
+  let bars  = '';
+  timeline.forEach((v, i) => {
+    const bh = (v / max) * 100;
+    const x  = i * (bw + gap);
+    bars += `<rect x="${x}" y="${110-bh}" width="${bw}" height="${bh}" fill="#f85149" rx="2"/>`;
+    bars += `<text x="${x+bw/2}" y="125" text-anchor="middle" class="tl-label">${v}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%">${bars}</svg>
+    <div class="window-label">Each bucket spans approximately ${bucketSec}s.</div>`;
+}
+
+loadSensorStatus();
+loadSummary();
+setInterval(() => { loadSensorStatus(); if (selectedMode !== 'custom') loadSummary(); }, 10000);
+</script>
+</body>
+</html>

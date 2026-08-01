@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Healthcare IDS — Live Detection</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #0f1419; color: #e6e8eb; }
+  .navbar { background: #161b22; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
+  .navbar h1 { font-size: 18px; font-weight: 600; }
+  .navbar a { color: #58a6ff; text-decoration: none; margin-left: 20px; font-size: 14px; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px; }
+
+  .status-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; background: #12161c; border: 1px solid #30363d; border-radius: 8px; padding: 14px 18px; }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: #f85149; flex-shrink: 0; }
+  .status-dot.on { background: #3fb950; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .status-text .main { font-size: 13px; font-weight: 600; }
+  .status-text .sub { font-size: 12px; color: #8b949e; margin-top: 2px; }
+  button { padding: 8px 16px; border-radius: 6px; border: none; font-size: 13px; cursor: pointer; font-weight: 600; }
+
+  .toolbar { display: flex; gap: 8px; margin-left: auto; }
+  .toolbar-item { position: relative; }
+  .icon-btn { width: 34px; height: 34px; padding: 0; display: flex; align-items: center; justify-content: center; background: #21262d; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; color: #8b949e; }
+  .icon-btn:hover { border-color: #58a6ff; color: #e6e8eb; }
+  .icon-btn.active { border-color: #58a6ff; color: #58a6ff; }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .popover { position: absolute; top: 42px; right: 0; width: 320px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 18px; box-shadow: 0 8px 24px rgba(0,0,0,.5); z-index: 30; display: none; }
+  .popover.show { display: block; }
+  .popover h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .popover-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .popover-field label { font-size: 11px; color: #8b949e; }
+  .popover-field input { width: 100%; background: #0d1117; border: 1px solid #30363d; color: #e6e8eb; padding: 7px 10px; border-radius: 6px; font-size: 12px; }
+  .popover-actions { display: flex; gap: 8px; }
+  .popover-actions button { flex: 1; font-size: 12px; padding: 7px; background: #21262d; color: #e6e8eb; border: 1px solid #30363d; }
+  .popover-actions button:hover { border-color: #58a6ff; }
+  .popover-hint { font-size: 11px; color: #8b949e; margin-top: 10px; line-height: 1.5; }
+
+  .warning-banner { background: rgba(210,153,34,.1); border: 1px solid #d29922; border-radius: 8px; padding: 14px 18px; margin-bottom: 24px; font-size: 13px; display: none; }
+  .warning-banner.show { display: block; }
+  .btn-warn { background: #9e6a03; color: white; margin-left: 12px; }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
+  .stat-card { background: #12161c; border: 1px solid #30363d; border-radius: 8px; padding: 18px; text-align: center; }
+  .stat-card .val { font-size: 28px; font-weight: 700; }
+  .stat-card .lbl { font-size: 11px; color: #8b949e; margin-top: 4px; }
+  .stat-card.total .val { color: #58a6ff; }
+  .stat-card.attack .val { color: #f85149; }
+  .stat-card.normal .val { color: #3fb950; }
+
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 22px; margin-bottom: 18px; }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+
+  .settings-row { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .setting-group { display: flex; flex-direction: column; gap: 6px; min-width: 220px; }
+  .setting-group label { font-size: 12px; color: #8b949e; display: flex; justify-content: space-between; }
+  .setting-group label .val { color: #58a6ff; font-weight: 700; }
+  input[type=range] { width: 100%; accent-color: #1f6feb; }
+  .btn-apply { background: #1f6feb; color: white; }
+  .apply-status { font-size: 12px; color: #3fb950; opacity: 0; transition: opacity .3s; margin-left: 8px; }
+  .apply-status.show { opacity: 1; }
+
+  .mode-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .mode-btn { padding: 6px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; font-size: 11px; cursor: pointer; color: #e6e8eb; }
+  .mode-btn.active { background: #1f6feb; border-color: #1f6feb; }
+  .btn-save { background: #238636; color: white; width: 100%; padding: 8px; }
+  .save-status { font-size: 12px; margin-top: 8px; }
+  .save-status.ok { color: #3fb950; }
+  .save-status.err { color: #f85149; }
+  .session-result { display: none; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 14px; margin-top: 12px; }
+  .session-result.show { display: block; }
+  .session-result-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+  .session-result-stat { text-align: center; }
+  .session-result-stat .val { font-size: 16px; font-weight: 700; }
+  .session-result-stat .lbl { font-size: 10px; color: #8b949e; }
+  .session-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn-dl { background: #21262d; color: #e6e8eb; border: 1px solid #30363d; padding: 6px 10px; border-radius: 6px; font-size: 11px; text-decoration: none; display: inline-block; }
+  .btn-dl:hover { border-color: #58a6ff; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid #30363d; }
+  th { color: #8b949e; font-weight: 600; font-size: 10px; text-transform: uppercase; }
+  tr.new-alert { animation: flash 1s ease; }
+  @keyframes flash { 0%{background:rgba(248,81,73,.25)} 100%{background:transparent} }
+  .conf-badge { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+  .conf-high { background: rgba(248,81,73,.2); color: #f85149; }
+  .conf-med  { background: rgba(210,153,34,.2); color: #d29922; }
+  .sev-badge { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+  .sev-critical { background: rgba(248,81,73,.25); color: #f85149; }
+  .sev-high     { background: rgba(240,136,62,.2); color: #f0883e; }
+  .sev-medium   { background: rgba(210,153,34,.2); color: #d29922; }
+  .sev-low      { background: rgba(139,148,158,.2); color: #8b949e; }
+  .empty-state { text-align: center; padding: 60px; color: #8b949e; font-size: 13px; }
+
+  input[type=datetime-local] { background: #0d1117; border: 1px solid #30363d; color: #e6e8eb; padding: 7px 10px; border-radius: 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div class="navbar">
+  <h1>Healthcare IDS — Live Detection</h1>
+  <div>
+    <a href="/summary">Attack Summary</a>
+    <a href="/live">Live Detection</a>
+  </div>
+</div>
+
+<div class="container">
+
+  <div class="warning-banner" id="warningBanner">
+    Model not trained yet. Run <code>python3 train_model.py</code> on the IDS Node, then click Retry.
+    <button class="btn-warn" onclick="retryCapture()">Retry</button>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-dot" id="statusDot"></div>
+    <div class="status-text">
+      <div class="main" id="statusMain">Checking status…</div>
+      <div class="sub"  id="statusSub"></div>
+    </div>
+    <div class="toolbar">
+      <!-- Export icon -->
+      <div class="toolbar-item">
+        <button class="icon-btn" title="Export logs" onclick="togglePopover('exportPopover', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </button>
+        <div class="popover" id="exportPopover">
+          <h3>Export Logs</h3>
+          <div class="popover-field"><label>From</label><input type="datetime-local" id="exportStart"></div>
+          <div class="popover-field"><label>To</label><input type="datetime-local" id="exportEnd"></div>
+          <div class="popover-actions">
+            <button onclick="exportLogs('csv')">Export CSV</button>
+            <button onclick="exportLogs('pcap')">Export PCAP</button>
+          </div>
+          <div class="popover-hint">Defaults to the full range since capture launched. Does not interrupt ongoing capture.</div>
+        </div>
+      </div>
+      <!-- Save session icon -->
+      <div class="toolbar-item">
+        <button class="icon-btn" title="Save session" onclick="togglePopover('savePopover', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+        </button>
+        <div class="popover" id="savePopover">
+          <h3>Save Session</h3>
+          <div class="mode-row" id="modeRow">
+            <div class="mode-btn active" data-mode="last_minutes" data-minutes="5">5 min</div>
+            <div class="mode-btn" data-mode="last_minutes" data-minutes="15">15 min</div>
+            <div class="mode-btn" data-mode="last_minutes" data-minutes="30">30 min</div>
+            <div class="mode-btn" data-mode="last_minutes" data-minutes="60">1 hr</div>
+            <div class="mode-btn" data-mode="since_launch">Since launch</div>
+            <div class="mode-btn" data-mode="custom">Custom</div>
+          </div>
+          <div id="customRow" style="display:none;">
+            <div class="popover-field"><label>From</label><input type="datetime-local" id="saveStart"></div>
+            <div class="popover-field"><label>To</label><input type="datetime-local" id="saveEnd"></div>
+          </div>
+          <button class="btn-save" onclick="saveSession()">Save</button>
+          <div class="save-status" id="saveStatus"></div>
+          <div class="session-result" id="sessionResult">
+            <strong id="sessionResultTitle" style="font-size:12px;"></strong>
+            <div class="session-result-stats">
+              <div class="session-result-stat"><div class="val" id="srTotal">0</div><div class="lbl">Total</div></div>
+              <div class="session-result-stat"><div class="val" id="srNormal">0</div><div class="lbl">Normal</div></div>
+              <div class="session-result-stat"><div class="val" id="srAttack">0</div><div class="lbl">Attack</div></div>
+            </div>
+            <div class="session-actions">
+              <a class="btn-dl" id="srDownloadCsv" href="#" download>Download CSV</a>
+              <a class="btn-dl" id="srDownloadPcap" href="#" download>Download PCAP</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card total"><div class="val" id="statTotal">0</div><div class="lbl">Flows Analysed</div></div>
+    <div class="stat-card attack"><div class="val" id="statAttack">0</div><div class="lbl">Attacks Detected</div></div>
+    <div class="stat-card normal"><div class="val" id="statNormal">0</div><div class="lbl">Normal Flows</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Detection Sensitivity</h2>
+    <div class="settings-row">
+      <div class="setting-group">
+        <label>Min Alert Confidence <span class="val" id="confVal">70%</span></label>
+        <input type="range" id="confSlider" min="0" max="100" step="1" value="70">
+      </div>
+      <div class="setting-group">
+        <label>Min Packets per Flow <span class="val" id="pktsVal">3</span></label>
+        <input type="range" id="pktsSlider" min="1" max="20" step="1" value="3">
+      </div>
+      <div>
+        <button class="btn-apply" onclick="applySettings()">Apply</button>
+        <span class="apply-status" id="applyStatus">Applied</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Live Alert Feed</h2>
+    <div id="alertsContainer">
+      <div class="empty-state">No alerts yet. Monitoring for threats…</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let pollInterval = null;
+let lastAlertCount = 0;
+let launchTimeIso  = null;
+
+// ── Popovers ──────────────────────────────────────────────────────────────────
+function togglePopover(id, btn) {
+  const target = document.getElementById(id);
+  const isOpen = target.classList.contains('show');
+  document.querySelectorAll('.popover').forEach(p => p.classList.remove('show'));
+  document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
+  if (!isOpen) { target.classList.add('show'); if (btn) btn.classList.add('active'); }
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.toolbar-item')) {
+    document.querySelectorAll('.popover').forEach(p => p.classList.remove('show'));
+    document.querySelectorAll('.icon-btn').forEach(b => b.classList.remove('active'));
+  }
+});
+
+// ── Settings sliders ──────────────────────────────────────────────────────────
+const confSlider  = document.getElementById('confSlider');
+const pktsSlider  = document.getElementById('pktsSlider');
+const applyStatus = document.getElementById('applyStatus');
+confSlider.addEventListener('input', () => document.getElementById('confVal').textContent = confSlider.value + '%');
+pktsSlider.addEventListener('input', () => document.getElementById('pktsVal').textContent = pktsSlider.value);
+
+async function applySettings() {
+  await fetch('/api/live/settings', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ min_confidence: parseFloat(confSlider.value),
+                           min_flow_packets: parseInt(pktsSlider.value) })
+  });
+  applyStatus.classList.add('show');
+  setTimeout(() => applyStatus.classList.remove('show'), 1500);
+}
+
+async function loadSettings() {
+  const res = await fetch('/api/live/settings');
+  const d = await res.json();
+  confSlider.value = d.min_confidence;
+  document.getElementById('confVal').textContent = d.min_confidence + '%';
+  pktsSlider.value = d.min_flow_packets;
+  document.getElementById('pktsVal').textContent = d.min_flow_packets;
+}
+
+// ── Status polling ────────────────────────────────────────────────────────────
+async function pollStatus() {
+  const res  = await fetch('/api/live/status');
+  const data = await res.json();
+  const dot    = document.getElementById('statusDot');
+  const main   = document.getElementById('statusMain');
+  const sub    = document.getElementById('statusSub');
+  const banner = document.getElementById('warningBanner');
+
+  if (data.running) {
+    dot.classList.add('on');
+    main.textContent = 'Live monitoring active';
+    sub.textContent  = data.launch_time ? `Capturing since ${data.launch_time.replace('T',' ')}` : '';
+    banner.classList.remove('show');
+    launchTimeIso = data.launch_time;
+    if (!document.getElementById('exportStart').value && launchTimeIso)
+      document.getElementById('exportStart').value = launchTimeIso.slice(0,16);
+    if (!document.getElementById('exportEnd').value)
+      document.getElementById('exportEnd').value = new Date().toISOString().slice(0,16);
+  } else {
+    dot.classList.remove('on');
+    main.textContent = 'Capture not running';
+    sub.textContent  = '';
+    banner.classList.add('show');
+  }
+
+  document.getElementById('statTotal').textContent  = data.stats.total  || 0;
+  document.getElementById('statAttack').textContent = data.stats.attacks || 0;
+  document.getElementById('statNormal').textContent = data.stats.normal  || 0;
+
+  const container = document.getElementById('alertsContainer');
+  if (!data.alerts || data.alerts.length === 0) {
+    container.innerHTML = `<div class="empty-state">No alerts yet. Monitoring for threats…</div>`;
+    return;
+  }
+
+  let html = `<table>
+    <tr><th>Time</th><th>Source</th><th>Target</th><th>Protocol</th><th>Type</th><th>Severity</th><th>Packets</th><th>Rate</th><th>Confidence</th></tr>`;
+  data.alerts.forEach((a, i) => {
+    const confClass = a.confidence > 90 ? 'conf-high' : 'conf-med';
+    const sevClass  = 'sev-' + (a.severity || 'low');
+    const isNew     = i === 0 && data.alerts.length > lastAlertCount;
+    html += `<tr class="${isNew ? 'new-alert' : ''}">
+      <td>${a.time}</td>
+      <td>${a.src_ip}:${a.src_port}</td>
+      <td>${a.dst_ip}:${a.dst_port}</td>
+      <td>${a.protocol}</td>
+      <td>${a.attack_type || 'Other Anomaly'}</td>
+      <td><span class="sev-badge ${sevClass}">${a.severity || 'low'}</span></td>
+      <td>${a.packets}</td>
+      <td>${a.pps} pkt/s</td>
+      <td><span class="conf-badge ${confClass}">${a.confidence}%</span></td>
+    </tr>`;
+  });
+  html += `</table>`;
+  container.innerHTML = html;
+  lastAlertCount = data.alerts.length;
+}
+
+async function retryCapture() {
+  await fetch('/api/live/restart', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify({iface:'enp0s3'})});
+  pollStatus();
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function exportLogs(type) {
+  const s = document.getElementById('exportStart').value;
+  const e = document.getElementById('exportEnd').value;
+  let url = `/api/live/export/${type}`;
+  if (s && e) url += `?start=${encodeURIComponent(s+':00')}&end=${encodeURIComponent(e+':00')}`;
+  window.location.href = url;
+}
+
+// ── Save session ──────────────────────────────────────────────────────────────
+let currentSaveSessionId = null;
+let selectedMode = 'last_minutes';
+let selectedMinutes = 5;
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedMode = btn.dataset.mode;
+    selectedMinutes = btn.dataset.minutes ? parseInt(btn.dataset.minutes) : null;
+    document.getElementById('customRow').style.display = (selectedMode === 'custom') ? 'block' : 'none';
+  });
+});
+
+async function saveSession() {
+  const statusEl = document.getElementById('saveStatus');
+  statusEl.className = 'save-status';
+  statusEl.textContent = 'Saving…';
+  document.getElementById('sessionResult').classList.remove('show');
+
+  const body = {mode: selectedMode};
+  if (selectedMode === 'last_minutes') body.minutes = selectedMinutes;
+  else if (selectedMode === 'custom') {
+    const s = document.getElementById('saveStart').value;
+    const e = document.getElementById('saveEnd').value;
+    if (!s || !e) { statusEl.className='save-status err'; statusEl.textContent='Pick start and end times.'; return; }
+    body.start_time = s + ':00'; body.end_time = e + ':00';
+  }
+
+  const res  = await fetch('/api/live/save_session', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const data = await res.json();
+
+  if (data.error) { statusEl.className='save-status err'; statusEl.textContent=data.error; return; }
+
+  statusEl.className = 'save-status ok';
+  statusEl.textContent = `Saved ${data.total_flows} flows (${data.window_start} to ${data.window_end})`;
+  currentSaveSessionId = data.session_id;
+  document.getElementById('sessionResultTitle').textContent = `Session ${data.session_id}`;
+  document.getElementById('srTotal').textContent  = data.total_flows;
+  document.getElementById('srNormal').textContent = data.normal_flows;
+  document.getElementById('srAttack').textContent = data.attack_flows;
+  document.getElementById('srDownloadCsv').href  = `/api/live/session/${data.session_id}/download/csv`;
+  document.getElementById('srDownloadPcap').href = `/api/live/session/${data.session_id}/download/pcap`;
+  document.getElementById('srDownloadPcap').style.display = data.pcap_available ? 'inline-block' : 'none';
+  document.getElementById('sessionResult').classList.add('show');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadSettings();
+pollStatus();
+pollInterval = setInterval(pollStatus, 3000);
+</script>
+</body>
+</html>

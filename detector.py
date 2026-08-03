@@ -1,11 +1,3 @@
-"""
-Live detection engine — runs continuously in the background from the
-moment the Flask app starts. Every processed flow is appended to an
-in-memory log and also written to a rolling pcap. Attack-flagged flows
-are tagged with a heuristic attack_type and severity for the dashboard
-and Telegram alerts. Saving a session snapshots a chosen timeframe
-from the running log without interrupting ongoing capture.
-"""
 import threading
 import time
 import subprocess
@@ -18,6 +10,9 @@ import os
 from collections import defaultdict
 from datetime import datetime
 from io import StringIO
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     from scapy.all import sniff, IP, TCP, UDP, PcapWriter
@@ -34,8 +29,8 @@ os.makedirs(SESSIONS_DIR, exist_ok=True)
 os.makedirs(CONTINUOUS_DIR, exist_ok=True)
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
-TELEGRAM_TOKEN   = '8252145983:AAGdh-At4ixinqnEPsnYmjlEyIrsxpWg3PM'
-TELEGRAM_CHAT_ID = '6518084073'
+TELEGRAM_TOKEN   = os.environ.get('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 TELEGRAM_URL     = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage'
 
 def send_telegram(message: str):

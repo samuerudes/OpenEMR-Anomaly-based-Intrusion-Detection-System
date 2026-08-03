@@ -1,0 +1,9 @@
+flask
+scapy
+pandas
+numpy
+scikit-learn
+imbalanced-learn
+joblib
+requests
+python-dotenv

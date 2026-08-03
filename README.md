@@ -112,7 +112,7 @@ ids_system/
 ### Installation
 
 ```bash
-git clone <this-repo-url>
+git clone https://github.com/samuerudes/OpenEMR-Anomaly-based-Intrusion-Detection-System
 cd ids_system
 python3 -m venv venv
 source venv/bin/activate      # Windows: venv\Scripts\activate
@@ -131,8 +131,6 @@ cp .env.example .env
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHAT_ID=your_chat_id_here
 ```
-
-> `.env` is git-ignored and never committed — only `.env.example` (with placeholder values) is tracked.
 
 ### Train the model
 

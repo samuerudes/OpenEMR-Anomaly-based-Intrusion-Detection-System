@@ -1,8 +1,3 @@
-"""
-Healthcare IDS Web Interface — Flask backend
-Always-on live detection, session export, attack summary dashboard.
-Auto-starts capture on launch.
-"""
 from flask import Flask, render_template, jsonify, request, send_file, Response
 import os, warnings
 warnings.filterwarnings('ignore')

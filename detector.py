@@ -33,6 +33,11 @@ TELEGRAM_TOKEN   = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 TELEGRAM_URL     = f'https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage'
 
+if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    print("[Telegram] WARNING: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set "
+          "in environment or .env file — alerts will fail to send.")
+
+
 def send_telegram(message: str):
     try:
         requests.post(TELEGRAM_URL, json={
@@ -79,6 +84,22 @@ running       = False
 launch_time   = None
 latest_time   = None
 current_iface = None
+_IDS_NODE_IP  = None
+
+def _detect_ids_node_ip(iface):
+    """Best-effort detection of the IDS node's own IP on the capture
+    interface, so its own traffic can be excluded from monitoring."""
+    try:
+        import socket, fcntl, struct
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        ip = socket.inet_ntoa(fcntl.ioctl(
+            s.fileno(), 0x8915,  # SIOCGIFADDR
+            struct.pack('256s', iface[:15].encode())
+        )[20:24])
+        return ip
+    except Exception as e:
+        print(f"[Detector] Could not auto-detect IDS node IP for {iface}: {e}")
+        return None
 
 _lock         = threading.Lock()
 _flows        = defaultdict(list)
@@ -95,13 +116,14 @@ _process_t    = None
 SEVERITY_ORDER = ['low', 'medium', 'high', 'critical']
 
 SEVERITY_BY_TYPE = {
-    'DDoS / Flood':                 'critical',
-    'Data Exfiltration':            'critical',
-    'DNS Tunneling / Exfiltration': 'high',
-    'Brute Force / Auth Attempt':   'high',
-    'Slow DoS (Slowloris-style)':   'high',
-    'Port Scan / Probe':            'medium',
-    'Other Anomaly':                'low',
+    'DDoS / Flood':                       'critical',
+    'Data Exfiltration':                  'critical',
+    'DNS Tunneling / Exfiltration':       'high',
+    'Brute Force / Auth Attempt':         'high',
+    'Slow DoS (Slowloris-style)':         'high',
+    'Port Scan / Probe':                  'medium',
+    'Enumeration / Directory Scanning':   'medium',
+    'Other Anomaly':                      'low',
 }
 
 def _severity_for(attack_type, confidence):
@@ -121,12 +143,23 @@ def _classify_attack_type(record):
     - 75th percentile of attack mean_packet_size = 60 bytes (pure SYN probes)
     - Median attack pps = 8,692  /  normal pps = 2,621
     - Nmap SYN flows: 2 packets, 60-byte mean, sub-ms duration
-    - Hydra brute-force: port 80, HTTP payload (>60 bytes), short duration
-    - Dirb enumeration: port 80, larger packets, low-medium rate
+    - Hydra brute-force: port 80, HTTP POST payload (larger), moderate packets
+    - Dirb enumeration: port 80, minimal GET/404 exchanges, few packets
     - Data exfiltration: large total_bytes (>5000), duration > 0.5s
     - DDoS/flood: very high pps (>50000) or very high bps (>10M)
     - DNS tunneling: UDP port 53
     - Slowloris: long duration (>15s), very low pps (<5)
+
+    NOTE: At flow-level granularity (no HTTP method/URL visibility), HTTP-based
+    brute-force and directory enumeration produce genuinely similar network
+    signatures — both are rapid, short-lived HTTP requests to the same port.
+    The split below uses packet/byte volume as an imperfect proxy: enumeration
+    tools typically send minimal requests and receive small 404 responses,
+    while credential brute-forcing carries a POST body and a fuller response
+    page. This is a heuristic distinction, not a reliable one — deep packet
+    inspection (URL path, HTTP method, request patterns) would be required for
+    confident separation, which is intentionally out of scope for this
+    flow-statistics-only design (see Future Work).
     """
     pps      = record.get('packets_per_second', 0)
     bps      = record.get('bytes_per_second', 0)
@@ -162,20 +195,25 @@ def _classify_attack_type(record):
     if mean_sz <= 64 and total_p <= 4 and duration < 1.0:
         return 'Port Scan / Probe'
 
-    # 6. HTTP brute-force — application-layer, port 80/443, carries HTTP
-    #    payload so slightly larger than bare SYN, short individual flows
-    if dst_port in (80, 443, 8080) and mean_sz > 64 and duration < 5.0:
-        return 'Brute Force / Auth Attempt'
+    # 6. HTTP-based attacks — split by volume as a proxy signal:
+    #    minimal exchange (few packets, small total bytes) suggests a
+    #    lightweight probe/404 response typical of directory enumeration;
+    #    a larger exchange suggests a POST body + fuller response page,
+    #    more typical of a credential brute-force attempt
+    if dst_port in (80, 443, 8080) and duration < 5.0:
+        if total_p <= 6 and total_b < 1500:
+            return 'Enumeration / Directory Scanning'
+        elif mean_sz > 64:
+            return 'Brute Force / Auth Attempt'
 
-    # 7. General enumeration / scanning — elevated rate but not flood-level
-    #    Attack median pps = 8,692 vs normal median = 2,621
-    #    Use 5,000 as the dividing line (above normal 75th pct of 2,954)
+    # 7. General high-rate scanning not caught above
     if pps > 5000:
         return 'Port Scan / Probe'
 
-    # 8. Low-rate anomalous flows on HTTP — likely slow enumeration (Dirb)
+    # 8. Low-rate anomalous flows still on HTTP ports — default to enumeration
+    #    since Dirb's slower probing is the more common source of this pattern
     if dst_port in (80, 443, 8080):
-        return 'Brute Force / Auth Attempt'
+        return 'Enumeration / Directory Scanning'
 
     # 9. Fallback — RF flagged it but no specific signature matched
     return 'Other Anomaly'
@@ -204,6 +242,23 @@ def _flow_features(pkts):
     return feats, timestamps[-1]
 
 # ── Packet callback ───────────────────────────────────────────────────────────
+def _is_ids_node_ip(ip):
+    """Excludes the IDS node's own address so its own background/system
+    traffic (mDNS, NTP, DHCP, etc.) is never captured as a monitored flow."""
+    return _IDS_NODE_IP is not None and ip == _IDS_NODE_IP
+
+def _is_multicast_or_broadcast(ip):
+    """Excludes multicast (224.0.0.0/4, e.g. mDNS at 224.0.0.251) and
+    broadcast (255.255.255.255, or a subnet's .255) traffic — routine
+    background discovery/announcement traffic, not point-to-point flows
+    relevant to intrusion detection."""
+    if ip == '255.255.255.255':
+        return True
+    first_octet = int(ip.split('.')[0])
+    if 224 <= first_octet <= 239:
+        return True
+    return False
+
 def _packet_callback(pkt):
     global _pcap_writer
     if _pcap_writer is not None:
@@ -215,9 +270,16 @@ def _packet_callback(pkt):
         return
     if not (pkt.haslayer(TCP) or pkt.haslayer(UDP)):
         return
-    proto    = 'TCP' if pkt.haslayer(TCP) else 'UDP'
-    src      = pkt[IP].src
-    dst      = pkt[IP].dst
+    proto = 'TCP' if pkt.haslayer(TCP) else 'UDP'
+    src   = pkt[IP].src
+    dst   = pkt[IP].dst
+
+    # Skip the IDS node's own traffic and any multicast/broadcast destination
+    if _is_ids_node_ip(src) or _is_ids_node_ip(dst):
+        return
+    if _is_multicast_or_broadcast(dst) or _is_multicast_or_broadcast(src):
+        return
+
     sp       = pkt[TCP].sport if pkt.haslayer(TCP) else pkt[UDP].sport
     dp       = pkt[TCP].dport if pkt.haslayer(TCP) else pkt[UDP].dport
     flow_key = tuple(sorted([(src, sp), (dst, dp)]) + [proto])
@@ -325,7 +387,7 @@ def _process_thread(rf, scaler, features):
 
 # ── Capture control ────────────────────────────────────────────────────────────
 def start(iface='enp0s3'):
-    global running, _sniff_t, _process_t, _pcap_writer, launch_time, current_iface
+    global running, _sniff_t, _process_t, _pcap_writer, launch_time, current_iface, _IDS_NODE_IP
     if running:
         return {'status': 'already_running', 'iface': current_iface}
     if not model_ready():
@@ -336,6 +398,8 @@ def start(iface='enp0s3'):
     if launch_time is None:
         launch_time = datetime.now()
     current_iface = iface
+    _IDS_NODE_IP  = _detect_ids_node_ip(iface)
+    print(f"[Detector] IDS node IP detected as: {_IDS_NODE_IP}")
     running = True
     _sniff_t   = threading.Thread(target=_sniff_thread,   args=(iface,),              daemon=True)
     _process_t = threading.Thread(target=_process_thread, args=(rf, scaler, features), daemon=True)
@@ -344,6 +408,7 @@ def start(iface='enp0s3'):
     print(f"[Detector] Started on {iface}")
     return {'status': 'started', 'iface': iface,
             'launch_time': launch_time.strftime('%Y-%m-%dT%H:%M:%S')}
+
 
 def _stop_internal():
     global running, _pcap_writer

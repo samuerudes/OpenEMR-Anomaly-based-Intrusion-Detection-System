@@ -1,7 +1,3 @@
-"""
-Run this on the IDS Node to validate classifier against your real dataset
-before redeploying app.py.
-"""
 import pandas as pd
 import sys, os
 sys.path.insert(0, os.path.expanduser('~/ids_system'))

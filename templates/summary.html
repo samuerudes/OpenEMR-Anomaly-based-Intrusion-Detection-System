@@ -152,6 +152,7 @@ function buildQuery() {
 
 function typeColor(n) {
   return {'DDoS / Flood':'#f85149','Port Scan / Probe':'#d29922',
+          'Enumeration / Directory Scanning':'#3fb950',
           'Data Exfiltration':'#a371f7','DNS Tunneling / Exfiltration':'#a371f7',
           'Brute Force / Auth Attempt':'#58a6ff','Slow DoS (Slowloris-style)':'#f0883e',
           'Other Anomaly':'#8b949e'}[n] || '#8b949e';

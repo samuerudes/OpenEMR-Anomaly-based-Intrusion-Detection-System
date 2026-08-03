@@ -158,7 +158,7 @@ Located in `attack_scripts/`, run from an attacker machine against the target EH
 
 | Script | Simulates |
 |---|---|
-| `data_exfil_sim.py` | Bulk sequential patient record scraping via an authenticated session |
+| `data_exfil_sim.py` | Bulk sequential patient record scraping via an authenticated session (remember to add credentials)|
 | `dns_exfil_sim.py` | DNS tunnelling — payload encoded into DNS query subdomains |
 
 Additional attack categories (port scanning, brute-force, DoS) were tested using standard tools: `nmap`, `hydra`, `dirb`, `hping3`, `ab` (ApacheBench), and `slowloris`.
